@@ -19,46 +19,74 @@ int kv_put(kv_t *db, char *key, char *value) {
     size_t idx = hash(key, db->capacity);
     kv_entry_t *entry = &db->entries[idx];
 
-    // key is already set, update
-    if (entry->key && entry->key != TOMBSTONE && !strcmp(entry->key, key)) {
-        free(entry->value);
-        char *valCopy = strdup(value);
-        if (!valCopy) return -1;
-        entry->value = valCopy;
-        return 0;
-    }
-
-    // collision -> set next on entry to new entry
-    if (entry->key && entry->key != TOMBSTONE && strcmp(entry->key, key)) {
-        kv_entry_t *next = entry->next;
-        while (next != NULL && next->key != TOMBSTONE) {
-            next = next->next;
-        }
-        char *keyCopy = strdup(key);
-        char *valCopy = strdup(value);
-        next->key = keyCopy;
-        next->value = valCopy;
-        return 0;
-    }
-
-    // entry is null or tombstone
+    // 1. If the bucket is empty or contains a tombstone, claim it directly
     if (!entry->key || entry->key == TOMBSTONE) {
+        // If it was a tombstone, free its old value first if necessary
+        if (entry->key == TOMBSTONE) {
+            free(entry->value);
+        }
+
         char *keyCopy = strdup(key);
+        if (!keyCopy) return -1;
+        
         char *valueCopy = strdup(value);
-        if (!keyCopy || !valueCopy) {
+        if (!valueCopy) {
             free(keyCopy);
-            free(valueCopy);
             return -1;
         }
+
         entry->key = keyCopy;
         entry->value = valueCopy;
         db->count++;
-
         return 0;
     }
 
-    return -1;
-} 
+    // 2. Traverse the primary entry and any collision nodes
+    kv_entry_t *curr = entry;
+    while (curr != NULL) {
+        // If key already exists, update its value
+        if (curr->key && curr->key != TOMBSTONE && !strcmp(curr->key, key)) {
+            free(curr->value);
+            char *valCopy = strdup(value);
+            if (!valCopy) return -1;
+            curr->value = valCopy;
+            return 0;
+        }
+
+        // If we reached the end of the chain, break out to insert a new node
+        if (curr->next == NULL) {
+            break;
+        }
+        curr = curr->next;
+    }
+
+    // 3. Key wasn't found in the chain; append a new collision node at the end
+    kv_entry_t *new_node = malloc(sizeof(kv_entry_t));
+    if (!new_node) return -1;
+
+    char *keyCopy = strdup(key);
+    if (!keyCopy) {
+        free(new_node);
+        return -1;
+    }
+
+    char *valCopy = strdup(value);
+    if (!valCopy) {
+        free(keyCopy);
+        free(new_node);
+        return -1;
+    }
+
+    new_node->key = keyCopy;
+    new_node->value = valCopy;
+    new_node->next = NULL;
+
+    // Link the new node to the end of the collision chain
+    curr->next = new_node;
+    db->count++;
+
+    return 0;
+}
 
 kv_t *kv_init(size_t capacity) {
     if (capacity == 0) {
@@ -75,8 +103,6 @@ kv_t *kv_init(size_t capacity) {
     table->count = 0;
     table->entries = calloc(capacity, sizeof(kv_entry_t));
     if (table->entries == NULL) {
-        // TODO: free malloc'd memory, is this necessary because I calloc'd it?
-        free(table->entries);
         free(table);
         return NULL;
     }
@@ -133,7 +159,7 @@ int kv_delete(kv_t *db, const char *key) {
 }
 
 void kv_free(kv_t *table) {
-    for (int i = 0; i < table->capacity; i += sizeof(kv_entry_t)) {
+    for (int i = 0; i < table->capacity; i++) {
         kv_entry_t *curr = &table->entries[i];
         kv_entry_t *prev = curr;
 
