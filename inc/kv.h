@@ -1,15 +1,16 @@
 #ifndef HASHTABLE_H
-
 #define HASHTABLE_H
+#define TOMBSTONE ((char *)0x1)
 
 #include <stdlib.h>
 
-#define TOMBSTONE ((char *)0x1)
+typedef struct kv_entry_t kv_entry_t;
 
-typedef struct {
+struct kv_entry_t {
     char *key;
     char *value;
-} kv_entry_t;
+    kv_entry_t *next;
+};
 
 typedef struct {
     size_t capacity;
