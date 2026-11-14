@@ -135,27 +135,30 @@ char *kv_get(kv_t *db, const char *key) {
 }
 
 int kv_delete(kv_t *db, const char *key) {
+    if (!db || !key) return -1;
+
     size_t idx = hash(key, db->capacity);
-    
     kv_entry_t *curr = &db->entries[idx];
 
-    if (curr == NULL) {
-        return -1;
-    }
+    // 1. Traverse looking for the key, guarding against NULL and TOMBSTONE
+    while (curr != NULL) {
+        if (curr->key && curr->key != TOMBSTONE && !strcmp(curr->key, key)) {
+            // Found it! Free the old heap-allocated key and value strings
+            free(curr->key);
+            free(curr->value);
 
-    while (curr->key != NULL && strcmp(curr->key, key)) {
+            // Mark as tombstone so future puts/gets know a collision happened here
+            curr->key = TOMBSTONE;
+            curr->value = NULL;
+            db->count--;
+
+            return (int)idx;
+        }
         curr = curr->next;
     }
 
-    free(curr->key);
-    free(curr->value);
-    // free(curr->next);
-
-    curr->key = TOMBSTONE;
-    curr->value = NULL;
-    db->count--;
-
-    return idx;
+    // Key not found
+    return -1;
 }
 
 void kv_free(kv_t *table) {
@@ -165,8 +168,10 @@ void kv_free(kv_t *table) {
 
         while (curr != NULL) {
             curr = curr->next;
-            free(prev->key);
-            free(prev->value);
+            if (prev->key && prev->key != TOMBSTONE) {
+                free(prev->key);
+                free(prev->value);
+            }
             prev = curr;
         }
     }
